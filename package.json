@@ -1,0 +1,7 @@
+{
+  "name": "pixli",
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.11",
+    "tailwindcss": "^4.1.11"
+  }
+}
