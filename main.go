@@ -100,6 +100,16 @@ func main() {
 	})
 
 	app.Get("/", func(c fiber.Ctx) error {
+		logout := fiber.Query[bool](c, "logout")
+		if logout {
+			c.ClearCookie("TOKEN")
+			return c.Render("index", fiber.Map{
+				"Auth":           false,
+				"GithubClientID": ghClientId,
+				"Username":       "",
+			})
+		}
+
 		if user, ok := c.Locals(UserKey).(User); ok {
 			return c.Render("index", fiber.Map{
 				"Auth":           true,
