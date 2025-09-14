@@ -1,7 +1,7 @@
 services:
   mongo:
     image: mongo
-    restart: always
+    restart: no
     environment:
       MONGO_INITDB_ROOT_USERNAME: pixli
       MONGO_INITDB_ROOT_PASSWORD: pixli
