@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -94,6 +95,38 @@ type URL struct {
 	DeletionKey string    `bson:"deletion_key" json:"-"`
 }
 
+type ShareXConfigHeaders struct {
+	Authorization string `json:"Authorization,omitempty"`
+}
+
+type ShareXConfig struct {
+	Version         string              `json:"Version,omitempty"`
+	Name            string              `json:"Name,omitempty"`
+	DestinationType string              `json:"DestinationType,omitempty"`
+	RequestMethod   string              `json:"RequestMethod,omitempty"`
+	RequestURL      string              `json:"RequestURL,omitempty"`
+	Headers         ShareXConfigHeaders `json:"Headers,omitempty"`
+	Data            string              `json:"Data,omitempty"`
+	Body            string              `json:"Body,omitempty"`
+	URL             string              `json:"URL,omitempty"`
+	DeletionURL     string              `json:"DeletionURL,omitempty"`
+	ErrorMessage    string              `json:"ErrorMessage,omitempty"`
+}
+
+type ShareXShortenRequest struct {
+	URL string `json:"url"`
+}
+
+type ShareXShortenResponse struct {
+	URL         string `json:"url"`
+	DeletionURL string `json:"deletion_url"`
+}
+
+type Token struct {
+	UserID  string `bson:"user_id"`
+	TokenID int    `bson:"token_id"`
+}
+
 type User struct {
 	ID       string
 	Username string
@@ -101,6 +134,7 @@ type User struct {
 }
 
 var UserKey struct{}
+var ShareXJWTAudience = []string{"ShareX"}
 
 func main() {
 	ctx := context.Background()
@@ -121,8 +155,9 @@ func main() {
 	}
 
 	settings.MaxDuration = time.Duration(maxDurationMinutes) * time.Minute
-
 	settings.Admins = make(map[string]struct{})
+
+	baseUrl := os.Getenv("PIXLI_BASE_URL")
 
 	for _, admin := range strings.Split(os.Getenv("PIXLI_ADMINS"), ",") {
 		settings.Admins[admin] = struct{}{}
@@ -143,6 +178,7 @@ func main() {
 	db := dbc.Database(dbName)
 	urlCollection := db.Collection("urls")
 	counterCollection := db.Collection("counters")
+	tokenCollection := db.Collection("tokens")
 
 	var urlCounter Counter
 	err = counterCollection.FindOne(ctx, bson.D{{"counter_id", "url"}}).Decode(&urlCounter)
@@ -348,29 +384,17 @@ func main() {
 			return err
 		}
 
-		var counter Counter
-		err = counterCollection.
-			FindOneAndUpdate(ctx, bson.D{{"counter_id", "url"}}, bson.D{{"$inc", bson.D{{"seq", 1}}}}).
-			Decode(&counter)
+		sUrl, err := generateShortUrl(ctx, counterCollection)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to get and update URL counter")
+			log.Error().Err(err).Msg("Failed to generate short URL")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "internal_server_error",
 			})
 		}
 
-		sUrl := string(base62.Encode([]byte(strconv.FormatInt(counter.Seq, 10))))
-		delClaims := DeletionKeyClaims{
-			ShortURL: sUrl,
-			RegisteredClaims: jwt.RegisteredClaims{
-				Subject:  user.ID,
-				IssuedAt: jwt.NewNumericDate(time.Now()),
-			},
-		}
-		delToken := jwt.NewWithClaims(jwt.SigningMethodHS256, delClaims)
-		delKey, err := delToken.SignedString(jwtSecret)
+		delKey, err := generateDeletionKey(ctx, user.ID, sUrl, jwtSecret)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to sign deletion key JWT token")
+			log.Error().Err(err).Msg("Failed to generate deletion key")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "internal_server_error",
 			})
@@ -449,7 +473,88 @@ func main() {
 		})
 	})
 
-	app.Post("/api/delete/:deletionKey", func(c fiber.Ctx) error {
+	app.Post("/api/shorten/sharex", func(c fiber.Ctx) error {
+		if len(c.Body()) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "empty_body",
+			})
+		}
+
+		auth := strings.SplitN(c.Get("Authorization"), " ", 2)
+		if auth[0] != "Bearer" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "unauthorized",
+			})
+		}
+
+		token, err := jwt.ParseWithClaims(auth[1], &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+		if err != nil || !token.Valid {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "unauthorized",
+			})
+		}
+
+		claims, ok := token.Claims.(*jwt.RegisteredClaims)
+		if !ok || claims.Audience[0] != ShareXJWTAudience[0] {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "unauthorized",
+			})
+		}
+
+		userId := claims.Subject
+
+		req := new(ShareXShortenRequest)
+		if err := c.Bind().Body(req); err != nil {
+			return err
+		}
+
+		sUrl, err := generateShortUrl(ctx, counterCollection)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to generate short URL")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		delKey, err := generateDeletionKey(ctx, userId, sUrl, jwtSecret)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to generate deletion key")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		url := URL{
+			CreatedAt:   time.Now(),
+			UserID:      userId,
+			ShortURL:    sUrl,
+			OriginalURL: req.URL,
+			DeletionKey: delKey,
+		}
+
+		_, isAdmin := settings.Admins[userId]
+
+		if settings.MaxDuration != time.Duration(0) && !isAdmin {
+			url.Until = time.Now().Add(settings.MaxDuration)
+		}
+
+		_, err = urlCollection.InsertOne(ctx, url)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to insert URL into database")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		return c.JSON(ShareXShortenResponse{
+			URL:         fmt.Sprintf("%s/%s", baseUrl, sUrl),
+			DeletionURL: fmt.Sprintf("%s/api/delete/%s", baseUrl, delKey),
+		})
+	})
+
+	app.Get("/api/delete/:deletionKey", func(c fiber.Ctx) error {
 		delToken, err := jwt.ParseWithClaims(c.Params("deletionKey"), &DeletionKeyClaims{}, func(token *jwt.Token) (interface{}, error) {
 			return jwtSecret, nil
 		})
@@ -486,6 +591,12 @@ func main() {
 			})
 		}
 
+		if c.Query("html") != "true" {
+			return c.JSON(fiber.Map{
+				"deleted": true,
+			})
+		}
+
 		find, err := urlCollection.Find(ctx, bson.D{{"user_id", claims.Subject}}, options.Find().
 			SetSort(bson.D{{"created_at", -1}}).
 			SetLimit(10))
@@ -506,6 +617,78 @@ func main() {
 		return c.Render("url-list", URLListData{
 			URLs: urls,
 		})
+	})
+
+	app.Get("/sharex", func(c fiber.Ctx) error {
+		user, ok := c.Locals(UserKey).(User)
+		if !ok {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "unauthorized",
+			})
+		}
+
+		var token Token
+		err = tokenCollection.FindOneAndUpdate(
+			ctx,
+			bson.D{{"user_id", user.ID}},
+			bson.D{{"$inc", bson.D{{"token_id", 1}}}},
+			options.FindOneAndUpdate().SetUpsert(true),
+		).Decode(&token)
+
+		claims := jwt.RegisteredClaims{
+			Subject:  user.ID,
+			Audience: ShareXJWTAudience,
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+			ID:       strconv.Itoa(token.TokenID),
+		}
+
+		jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		jwtTokenString, err := jwtToken.SignedString(jwtSecret)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to sign ShareX token")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		configData, err := json.Marshal(ShareXShortenRequest{
+			URL: "{input}",
+		})
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to marshal ShareX config data")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		config := ShareXConfig{
+			Version:         "18.0.0",
+			Name:            "Pixli",
+			DestinationType: "URLShortener",
+			RequestMethod:   "POST",
+			RequestURL:      fmt.Sprintf("%s/api/shorten/sharex", baseUrl),
+			Headers: ShareXConfigHeaders{
+				Authorization: "Bearer " + jwtTokenString,
+			},
+			Data:         string(configData),
+			Body:         "JSON",
+			URL:          "{json:url}",
+			DeletionURL:  "{json:deletion_url}",
+			ErrorMessage: "{json:error}",
+		}
+
+		c.Set(fiber.HeaderContentDisposition, "attachment; filename=\"Pixli.sxcu\"")
+		c.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+
+		rj, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to marshal ShareX config")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		return c.Send(rj)
 	})
 
 	app.Get("/:shortUrl\\+", func(c fiber.Ctx) error {
@@ -623,4 +806,33 @@ func renderAuth(c fiber.Ctx, ctx context.Context, user User, settings Settings, 
 		Notices:         notices,
 		URLs:            urls,
 	})
+}
+
+func generateShortUrl(ctx context.Context, counterCollection *mongo.Collection) (string, error) {
+	var counter Counter
+	err := counterCollection.
+		FindOneAndUpdate(ctx, bson.D{{"counter_id", "url"}}, bson.D{{"$inc", bson.D{{"seq", 1}}}}).
+		Decode(&counter)
+	if err != nil {
+		return "", err
+	}
+
+	return string(base62.Encode([]byte(strconv.FormatInt(counter.Seq, 10)))), nil
+}
+
+func generateDeletionKey(ctx context.Context, userId, shortUrl string, jwtSecret []byte) (string, error) {
+	delClaims := DeletionKeyClaims{
+		ShortURL: shortUrl,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:  userId,
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+		},
+	}
+	delToken := jwt.NewWithClaims(jwt.SigningMethodHS256, delClaims)
+	delKey, err := delToken.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return delKey, nil
 }
