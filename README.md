@@ -28,5 +28,8 @@ Simple URL shortener compatible with ShareX.
 - `GITHUB_CLIENT_SECRET` – GitHub OAuth app client secret
 - `JWT_SECRET` – Secret for JWT tokens, generated using `cmd/jwtsecretgen` (go run ./cmd/jwtsecretgen)
 
+> To get your GitHub user ID, open your browser console after logging in, scroll down and open the script tag. You should see your user ID there.
+> ![](https://i.imgur.com/0ZLyJZP.png)
+
 ## License
 MIT
