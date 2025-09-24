@@ -650,26 +650,14 @@ func main() {
 			})
 		}
 
-		find, err := urlCollection.Find(ctx, bson.D{{"user_id", claims.Subject}}, options.Find().
-			SetSort(bson.D{{"created_at", -1}}).
-			SetLimit(10))
+		list, err := getURLList(ctx, claims.Subject, urlCollection, 1)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to find URLs for user")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "internal_server_error",
-			})
-		}
-		var urls []URL
-		if err = find.All(ctx, &urls); err != nil {
-			log.Error().Err(err).Msg("Failed to decode URLs for user")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "internal_server_error",
 			})
 		}
 
-		return c.Render("url-list", URLListData{
-			URLs: urls,
-		})
+		return c.Render("url-list", list)
 	})
 
 	app.Get("/sharex", func(c fiber.Ctx) error {
