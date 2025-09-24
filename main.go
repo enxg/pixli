@@ -62,11 +62,15 @@ type IndexData struct {
 	UntilMaxEnabled  bool
 	UntilMax         string
 	Notices          []string
-	URLs             []URL
+	URLListData      URLListData
 }
 
 type URLListData struct {
-	URLs []URL
+	URLs      []URL
+	Page      int
+	PrevPage  int
+	NextPage  int
+	PageCount int
 }
 
 type Settings struct {
@@ -93,6 +97,13 @@ type URL struct {
 	ShortURL    string    `bson:"short_url" json:"short_url"`
 	OriginalURL string    `bson:"original_url" json:"original_url"`
 	DeletionKey string    `bson:"deletion_key" json:"-"`
+}
+
+type DBURLsResult struct {
+	Metadata struct {
+		Total int `bson:"total"`
+	} `bson:"metadata"`
+	URLs []URL `bson:"data"`
 }
 
 type ShareXConfigHeaders struct {
@@ -135,6 +146,8 @@ type User struct {
 
 var UserKey struct{}
 var ShareXJWTAudience = []string{"ShareX"}
+
+var pageSize = 10
 
 func main() {
 	ctx := context.Background()
@@ -299,18 +312,24 @@ func main() {
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get access token from GitHub")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 		if res.StatusCode() != fiber.StatusOK {
 			log.Error().Msgf("GitHub OAuth failed with status code: %d", res.StatusCode())
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		var resp GHAuthResponse
 		err = res.JSON(&resp)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to parse GitHub response")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		res, err = cc.Get("https://api.github.com/user", client.Config{
@@ -322,18 +341,24 @@ func main() {
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get user info from GitHub")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 		if res.StatusCode() != fiber.StatusOK {
 			log.Error().Msgf("GitHub user info request failed with status code: %d", res.StatusCode())
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		var userResp GHUserResponse
 		err = res.JSON(&userResp)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to parse user info response from GitHub")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		userId := strconv.FormatInt(userResp.ID, 10)
@@ -350,7 +375,9 @@ func main() {
 		tokenString, err := token.SignedString(jwtSecret)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to sign JWT token")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		c.Cookie(&fiber.Cookie{
@@ -451,26 +478,14 @@ func main() {
 			})
 		}
 
-		find, err := urlCollection.Find(ctx, bson.D{{"user_id", user.ID}}, options.Find().
-			SetSort(bson.D{{"created_at", -1}}).
-			SetLimit(10))
+		list, err := getURLList(ctx, user.ID, urlCollection, 1)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to find URLs for user")
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "internal_server_error",
-			})
-		}
-		var urls []URL
-		if err = find.All(ctx, &urls); err != nil {
-			log.Error().Err(err).Msg("Failed to decode URLs for user")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "internal_server_error",
 			})
 		}
 
-		return c.Render("url-list", URLListData{
-			URLs: urls,
-		})
+		return c.Render("url-list", list)
 	})
 
 	app.Post("/api/shorten/sharex", func(c fiber.Ctx) error {
@@ -552,6 +567,29 @@ func main() {
 			URL:         fmt.Sprintf("%s/%s", baseUrl, sUrl),
 			DeletionURL: fmt.Sprintf("%s/api/delete/%s", baseUrl, delKey),
 		})
+	})
+
+	app.Get("/list", func(c fiber.Ctx) error {
+		user, ok := c.Locals(UserKey).(User)
+		if !ok {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "unauthorized",
+			})
+		}
+
+		page, err := strconv.Atoi(c.Query("page", "1"))
+		if err != nil || page < 1 {
+			page = 1
+		}
+
+		list, err := getURLList(ctx, user.ID, urlCollection, page)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
+		}
+
+		return c.Render("url-list", list)
 	})
 
 	app.Get("/api/delete/:deletionKey", func(c fiber.Ctx) error {
@@ -700,7 +738,9 @@ func main() {
 		}
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to find URL in database")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		return c.JSON(url)
@@ -715,7 +755,9 @@ func main() {
 		}
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to find URL in database")
-			return c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "internal_server_error",
+			})
 		}
 
 		return c.Redirect().Status(fiber.StatusFound).To(url.OriginalURL)
@@ -780,18 +822,8 @@ func renderAuth(c fiber.Ctx, ctx context.Context, user User, settings Settings, 
 		notices = append(notices, "URLs shortened via ShareX will be set to the maximum duration.")
 	}
 
-	find, err := urlCollection.Find(ctx, bson.D{{"user_id", user.ID}}, options.Find().
-		SetSort(bson.D{{"created_at", -1}}).
-		SetLimit(10))
+	list, err := getURLList(ctx, user.ID, urlCollection, 1)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to find URLs for user")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "internal_server_error",
-		})
-	}
-	var urls []URL
-	if err = find.All(ctx, &urls); err != nil {
-		log.Error().Err(err).Msg("Failed to decode URLs for user")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "internal_server_error",
 		})
@@ -804,7 +836,7 @@ func renderAuth(c fiber.Ctx, ctx context.Context, user User, settings Settings, 
 		UntilMaxEnabled: untilMaxEnabled,
 		UntilMax:        now.Add(settings.MaxDuration).Format(time.RFC3339),
 		Notices:         notices,
-		URLs:            urls,
+		URLListData:     list,
 	})
 }
 
@@ -835,4 +867,45 @@ func generateDeletionKey(userId, shortUrl string, jwtSecret []byte) (string, err
 	}
 
 	return delKey, nil
+}
+
+func getURLList(ctx context.Context, userId string, urlCollection *mongo.Collection, page int) (URLListData, error) {
+	limit := pageSize
+	skip := (page - 1) * limit
+
+	matchStage := bson.D{{"$match", bson.D{{"user_id", userId}}}}
+
+	countStage := bson.D{{"$count", "total"}}
+
+	sortStage := bson.D{{"$sort", bson.D{{"created_at", -1}}}}
+	skipStage := bson.D{{"$skip", skip}}
+	limitStage := bson.D{{"$limit", limit}}
+
+	facetStage := bson.D{{"$facet", bson.D{
+		{"metadata", bson.A{countStage}},
+		{"data", bson.A{sortStage, skipStage, limitStage}},
+	}}}
+
+	unwindStage := bson.D{{"$unwind", "$metadata"}}
+
+	pipeline := mongo.Pipeline{matchStage, facetStage, unwindStage}
+	cursor, err := urlCollection.Aggregate(ctx, pipeline)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to find URLs for user")
+		return URLListData{}, err
+	}
+
+	var res []DBURLsResult
+	if err = cursor.All(ctx, &res); err != nil {
+		log.Error().Err(err).Msg("Failed to decode URLs for user")
+		return URLListData{}, err
+	}
+
+	return URLListData{
+		URLs:      res[0].URLs,
+		Page:      page,
+		PrevPage:  page - 1,
+		NextPage:  page + 1,
+		PageCount: (res[0].Metadata.Total + pageSize - 1) / pageSize,
+	}, nil
 }

@@ -10,3 +10,15 @@
     </div>
 </div>
 {{ end }}
+<div class="flex flex-row gap-2 justify-center items-center mt-4">
+    <button {{ if le .Page 1 }} disabled {{ end }} class="p-2 border border-zinc-800 hover:bg-zinc-800 duration-150 rounded-lg hover:cursor-pointer disabled:cursor-auto disabled:opacity-50 disabled:hover:bg-transparent" hx-get="/list?page={{.PrevPage}}" hx-target="#list">
+        <svg class="h-4 w-auto" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Solar by 480 Design - https://creativecommons.org/licenses/by/4.0/ --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m13 19l-6-7l6-7"/><path d="m17 19l-6-7l6-7"/></g></svg>
+    </button>
+    <label>
+        <input id="page" name="page" type="number" min="1" max="{{.PageCount}}" required class="p-2 h-8 w-16 text-center tabular-nums border border-zinc-800 rounded-lg" value="{{.Page}}" hx-get="/list" hx-target="#list" hx-trigger="change" hx-validate="true"/>
+    </label>
+    <span>/ {{.PageCount}}</span>
+    <button {{ if ge .Page .PageCount }} disabled {{ end }} class="p-2 border border-zinc-800 hover:bg-zinc-800 duration-150 rounded-lg hover:cursor-pointer disabled:cursor-auto disabled:opacity-50 disabled:hover:bg-transparent" hx-get="/list?page={{.NextPage}}" hx-target="#list">
+        <svg class="h-4 w-auto" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Solar by 480 Design - https://creativecommons.org/licenses/by/4.0/ --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m11 19l6-7l-6-7"/><path d="m7 19l6-7l-6-7"/></g></svg>
+    </button>
+</div>

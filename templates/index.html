@@ -55,7 +55,7 @@
                 </ul>
             </form>
             <div class="flex flex-col gap-1 w-full px-1" id="list">
-                {{ template "url-list" . }}
+                {{ template "url-list" .URLListData }}
             </div>
             {{ else }}
             <div class="flex flex-row w-max items-center justify-center">
@@ -80,6 +80,7 @@
                 pad(date.getMinutes());
         }
 
+        htmx.config.reportValidityOfForms = true;
         history.pushState(null, "", location.href.split("?")[0]);
 
         const enableUntilCheckbox = document.getElementById("enableUntil");
