@@ -392,7 +392,7 @@ func main() {
 			})
 		}
 
-		delKey, err := generateDeletionKey(ctx, user.ID, sUrl, jwtSecret)
+		delKey, err := generateDeletionKey(user.ID, sUrl, jwtSecret)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to generate deletion key")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -518,7 +518,7 @@ func main() {
 			})
 		}
 
-		delKey, err := generateDeletionKey(ctx, userId, sUrl, jwtSecret)
+		delKey, err := generateDeletionKey(userId, sUrl, jwtSecret)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to generate deletion key")
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -820,7 +820,7 @@ func generateShortUrl(ctx context.Context, counterCollection *mongo.Collection) 
 	return string(base62.Encode([]byte(strconv.FormatInt(counter.Seq, 10)))), nil
 }
 
-func generateDeletionKey(ctx context.Context, userId, shortUrl string, jwtSecret []byte) (string, error) {
+func generateDeletionKey(userId, shortUrl string, jwtSecret []byte) (string, error) {
 	delClaims := DeletionKeyClaims{
 		ShortURL: shortUrl,
 		RegisteredClaims: jwt.RegisteredClaims{
