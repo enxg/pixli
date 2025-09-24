@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -413,6 +414,12 @@ func main() {
 			return err
 		}
 
+		if req.URL == "" || !isValidUrl(req.URL) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid_url",
+			})
+		}
+
 		sUrl, err := generateShortUrl(ctx, counterCollection)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to generate short URL")
@@ -525,6 +532,12 @@ func main() {
 		req := new(ShareXShortenRequest)
 		if err := c.Bind().Body(req); err != nil {
 			return err
+		}
+
+		if req.URL == "" || !isValidUrl(req.URL) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid_url",
+			})
 		}
 
 		sUrl, err := generateShortUrl(ctx, counterCollection)
@@ -918,4 +931,9 @@ func getURLList(ctx context.Context, userId string, urlCollection *mongo.Collect
 		NextPage:  page + 1,
 		PageCount: (total + pageSize - 1) / pageSize,
 	}, nil
+}
+
+func isValidUrl(s string) bool {
+	u, err := neturl.Parse(s)
+	return err == nil && u.Scheme != "" && u.Host != ""
 }
