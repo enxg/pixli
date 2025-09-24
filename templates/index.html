@@ -87,16 +87,20 @@
         const advancedOptions = document.getElementById("advancedOptions");
         const timezoneInput = document.getElementById("timezone");
 
-        timezoneInput.value = new Date().getTimezoneOffset();
-
-        const untilMinTime = new Date("{{.UntilMin}}");
-        untilInput.min = toDatetimeLocalValue(untilMinTime);
-
         const userID = "{{.User.ID}}";
         const username = "{{.User.Username}}";
         const admin = "{{.User.Admin}}" === "true";
 
         const untilMaxEnabled = "{{.UntilMaxEnabled}}" === "true";
+
+        if (!userID) {
+            throw new Error("Not continuing as the user is not logged in")
+        }
+
+        timezoneInput.value = new Date().getTimezoneOffset();
+
+        const untilMinTime = new Date("{{.UntilMin}}");
+        untilInput.min = toDatetimeLocalValue(untilMinTime);
 
         if (untilMaxEnabled && !admin) {
             const untilMaxTime = new Date("{{.UntilMax}}");
