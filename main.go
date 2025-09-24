@@ -164,10 +164,14 @@ func main() {
 
 	maxDurationMinutes, err := strconv.Atoi(os.Getenv("PIXLI_MAX_DURATION"))
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to parse PIXLI_MAX_DURATION")
+		log.Error().Err(err).Msg("Failed to parse PIXLI_MAX_DURATION, defaulting to 0 (no limit)")
+		maxDurationMinutes = 0
 	}
 
 	settings.MaxDuration = time.Duration(maxDurationMinutes) * time.Minute
+	println("Max duration:", settings.MaxDuration.String())
+	println(settings.MaxDuration == time.Duration(0))
+
 	settings.Admins = make(map[string]struct{})
 
 	baseUrl := os.Getenv("PIXLI_BASE_URL")
