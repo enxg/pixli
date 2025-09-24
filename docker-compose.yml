@@ -3,8 +3,8 @@ services:
     image: ghcr.io/enxg/pixli:latest
     depends_on:
       - mongo
-    env_file:
-      - .env
+    # env_file:
+    #   - .env
     # ports:
     #     - "3000:3000"
   mongo:
