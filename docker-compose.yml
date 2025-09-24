@@ -1,0 +1,20 @@
+services:
+  pixli:
+    image: ghcr.io/enxg/pixli:latest
+    depends_on:
+      - mongo
+    env_file:
+      - .env
+    # ports:
+    #     - "3000:3000"
+  mongo:
+    image: mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: pixli
+      MONGO_INITDB_ROOT_PASSWORD: pixli # change if you expose the port
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
