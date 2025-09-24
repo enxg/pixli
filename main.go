@@ -901,11 +901,19 @@ func getURLList(ctx context.Context, userId string, urlCollection *mongo.Collect
 		return URLListData{}, err
 	}
 
+	var urls []URL
+	var total int
+
+	if len(res) > 0 {
+		urls = res[0].URLs
+		total = res[0].Metadata.Total
+	}
+
 	return URLListData{
-		URLs:      res[0].URLs,
+		URLs:      urls,
 		Page:      page,
 		PrevPage:  page - 1,
 		NextPage:  page + 1,
-		PageCount: (res[0].Metadata.Total + pageSize - 1) / pageSize,
+		PageCount: (total + pageSize - 1) / pageSize,
 	}, nil
 }
