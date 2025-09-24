@@ -15,6 +15,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/client"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/static"
 	"github.com/gofiber/template/html/v2"
 	"github.com/golang-jwt/jwt/v5"
@@ -243,6 +244,12 @@ func main() {
 		JSONDecoder: sonic.Unmarshal,
 		JSONEncoder: sonic.Marshal,
 	})
+
+	app.Use(limiter.New(limiter.Config{
+		Max:               10,
+		Expiration:        30 * time.Second,
+		LimiterMiddleware: limiter.SlidingWindow{},
+	}))
 
 	app.Use("/", static.New("./static"))
 	app.Use("/", func(c fiber.Ctx) error {
