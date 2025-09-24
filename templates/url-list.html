@@ -1,10 +1,10 @@
 {{ range .URLs }}
-<div class="grid grid-cols-8 gap-4">
+<div class="grid md:grid-cols-8 grid-cols-4 gap-4">
     <div class="flex flex-row justify-between items-center">
-        <a href="/{{.ShortURL}}" rel="nofollow" target="_blank" class="text-blue-500">{{.ShortURL}}</a>
+        <a href="/{{.ShortURL}}" rel="nofollow" target="_blank" class="text-blue-500 truncate">{{.ShortURL}}</a>
         <a href="/{{.ShortURL}}+" rel="nofollow" target="_blank" class="text-gray-400 hover:text-gray-300 duration-150">+</a>
     </div>
-    <span class="truncate col-span-6">{{.OriginalURL}}</span>
+    <span class="truncate md:col-span-6 col-span-2">{{.OriginalURL}}</span>
     <div class="flex flex-row items-center justify-end">
         <a hx-get="/api/delete/{{.DeletionKey}}?html=true" hx-target="#list" class=" text-red-500 hover:text-red-600 duration-150 font-semibold hover:underline hover:cursor-pointer select-none">Delete</a>
     </div>
