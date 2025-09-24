@@ -169,8 +169,6 @@ func main() {
 	}
 
 	settings.MaxDuration = time.Duration(maxDurationMinutes) * time.Minute
-	println("Max duration:", settings.MaxDuration.String())
-	println(settings.MaxDuration == time.Duration(0))
 
 	settings.Admins = make(map[string]struct{})
 
