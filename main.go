@@ -249,6 +249,9 @@ func main() {
 		Max:               10,
 		Expiration:        30 * time.Second,
 		LimiterMiddleware: limiter.SlidingWindow{},
+		KeyGenerator: func(ctx fiber.Ctx) string {
+			return ctx.Get("x-forwarded-for")
+		},
 	}))
 
 	app.Use("/", static.New("./static"))
